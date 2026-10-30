@@ -13,6 +13,7 @@ import {
   makeAccept,
   makeOffer,
   parseTranscriptExport,
+  verifyTranscriptRecord,
   type TranscriptRecord,
 } from "../src/index.js";
 
@@ -127,6 +128,50 @@ describe("trusted transcript records", () => {
       ok: false,
       reason: "lock.from does not match the record sender",
     });
+  });
+
+  it("verifies signatures under the venue's strict Ed25519 rules, not ZIP-215", () => {
+    // A did:key whose "public key" is the identity point (small order). Under ZIP-215 the
+    // signature R = identity, S = 0 satisfies the cofactored equation for every message;
+    // libsodium — what the venue verifies with — refuses the key outright.
+    const weakKey = new Uint8Array(32);
+    weakKey[0] = 1;
+    const weakDid = `did:key:z${base58.encode(Uint8Array.from([0xed, 0x01, ...weakKey]))}`;
+    const anySig = new Uint8Array(64);
+    anySig[0] = 1;
+    const signature = base64urlnopad.encode(anySig);
+
+    const offer = makeOffer({
+      from: weakDid,
+      role: "payer",
+      amount: "1000",
+      asset: "USDC",
+      lock: "hash",
+      rails: ["flop-htlc"],
+      claimByMs: NOW + 3_600_000,
+      refundAfterMs: NOW + 7_200_000,
+      expiresMs: NOW + 60_000,
+      nonce: "0011223344556677",
+    });
+    const forged: TranscriptRecord = {
+      room: BOARD,
+      seq: 1,
+      timestampMs: NOW,
+      sender: weakDid,
+      nonce: "1",
+      signature,
+      line: encodeFrame(offer),
+    };
+    expect(verifyTranscriptRecord(forged)).toEqual({
+      ok: false,
+      reason: "record signature does not verify",
+    });
+    expect(verifyTranscriptRecord({ ...forged, nonce: "2", line: "anything at all" }).ok).toBe(false);
+    expect(foldTranscript([forged]).state).toBeNull();
+
+    // An ordinary key still verifies.
+    const { offer: honest } = deal();
+    expect(verifyTranscriptRecord(record(BOARD, 1, NOW, payer, encodeFrame(honest)))).toEqual({ ok: true });
   });
 
   it("rejects a valid post-accept frame outside the contract's derived deal room", () => {

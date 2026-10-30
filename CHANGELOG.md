@@ -8,6 +8,12 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- `verifyTranscriptRecord` (and so `foldTranscript` and `findContractHandshake`) now
+  verifies Ed25519 under RFC 8032 rules instead of noble's ZIP-215 default, matching the
+  venue's libsodium check. Under ZIP-215 a `did:key` built from a small-order point
+  verified one fixed signature over every message, so an export could carry
+  "authenticated" records the venue would have refused.
+
 - `tclk_post_frame` now accepts exact decimal-string nonces in addition to safe integer
   numbers, so signed Technocore nonces above JavaScript's safe-integer range are preserved
   without precision loss. Unsafe numeric nonces (> 2^53 - 1) are rejected at the MCP schema
