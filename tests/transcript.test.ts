@@ -130,10 +130,10 @@ describe("trusted transcript records", () => {
     });
   });
 
-  it("verifies signatures under the venue's strict Ed25519 rules, not ZIP-215", () => {
-    // A did:key whose "public key" is the identity point (small order). Under ZIP-215 the
-    // signature R = identity, S = 0 satisfies the cofactored equation for every message;
-    // libsodium — what the venue verifies with — refuses the key outright.
+  // A did:key whose "public key" is the identity point (small order), with a record
+  // signed R = identity, S = 0. Under ZIP-215 that satisfies the cofactored equation for
+  // every message; libsodium, what the venue verifies with, refuses the key outright.
+  function smallOrderForgery(): TranscriptRecord {
     const weakKey = new Uint8Array(32);
     weakKey[0] = 1;
     const weakDid = `did:key:z${base58.encode(Uint8Array.from([0xed, 0x01, ...weakKey]))}`;
@@ -162,6 +162,11 @@ describe("trusted transcript records", () => {
       signature,
       line: encodeFrame(offer),
     };
+    return forged;
+  }
+
+  it("verifies signatures under the venue's strict Ed25519 rules, not ZIP-215", () => {
+    const forged = smallOrderForgery();
     expect(verifyTranscriptRecord(forged)).toEqual({
       ok: false,
       reason: "record signature does not verify",
@@ -169,8 +174,16 @@ describe("trusted transcript records", () => {
     expect(verifyTranscriptRecord({ ...forged, nonce: "2", line: "anything at all" }).ok).toBe(false);
     expect(foldTranscript([forged]).state).toBeNull();
 
-    // The same forgery with R encoded non-canonically (the identity as y = p + 1): ZIP-215
-    // accepts non-canonical encodings, RFC 8032 and libsodium refuse them.
+    // An ordinary key still verifies.
+    const { offer: honest } = deal();
+    expect(verifyTranscriptRecord(record(BOARD, 1, NOW, payer, encodeFrame(honest)))).toEqual({ ok: true });
+  });
+
+  it("refuses a non-canonically encoded R that ZIP-215 accepts", () => {
+    // The small-order forgery with R encoded non-canonically (the identity as y = p + 1):
+    // ZIP-215 accepts non-canonical encodings, RFC 8032 and libsodium refuse them. Its own
+    // case, so the assertion runs even when the small-order case above fails first.
+    const forged = smallOrderForgery();
     const nonCanonicalR = new Uint8Array(64);
     nonCanonicalR[0] = 0xee;
     nonCanonicalR.fill(0xff, 1, 31);
@@ -178,10 +191,6 @@ describe("trusted transcript records", () => {
     expect(
       verifyTranscriptRecord({ ...forged, nonce: "3", signature: base64urlnopad.encode(nonCanonicalR) }).ok,
     ).toBe(false);
-
-    // An ordinary key still verifies.
-    const { offer: honest } = deal();
-    expect(verifyTranscriptRecord(record(BOARD, 1, NOW, payer, encodeFrame(honest)))).toEqual({ ok: true });
   });
 
   it("rejects a valid post-accept frame outside the contract's derived deal room", () => {
